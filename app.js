@@ -1,5 +1,5 @@
 const SHARED_SECRET = "MY_SECRET_KEY_123";
-const BIT_DURATION_MS = 150; // 150ms synced speed
+const BIT_DURATION_MS = 200; // Increased to 200ms for reliable camera detection
 
 let track = null;
 let useTorch = false;
@@ -60,7 +60,7 @@ async function transmitToken() {
     if (btn) btn.disabled = true;
 
     const payload = generateToken();
-    const fullBitStream = "1100" + payload + "0"; // Preamble (1100) + Data + Stop Bit
+    const fullBitStream = "11" + payload + "0"; // Sync Header (11) + 16-bit Payload + Stop Bit
     
     if (status) status.innerText = `Transmitting: ${payload}`;
 
