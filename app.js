@@ -5,7 +5,7 @@ let track = null;
 let useTorch = false;
 let isTransmitting = false;
 
-// Inter-tab communication channel for direct software-to-software simulation
+// Inter-tab co channel for direct software-to-software simulation
 const channel = new BroadcastChannel('optical_key_channel');
 
 // Detect hardware capabilities (LED Flashlight vs Screen Flash) on load
