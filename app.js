@@ -1,16 +1,11 @@
 const SHARED_SECRET = "MY_SECRET_KEY_123";
-const BIT_DURATION_MS = 100; // 100ms per bit = 10 Hz
+const BIT_DURATION_MS = 150; // 150ms synced speed
 
 let track = null;
 let useTorch = false;
 
-// Generate a random unique Session Salt EVERY TIME the page opens/refreshes
-const SESSION_SALT = Math.floor(Math.random() * 65536).toString(16).padStart(4, '0');
-
-// Auto-detect hardware capability on page load
 window.addEventListener('DOMContentLoaded', async () => {
     const desc = document.getElementById('mode-desc');
-    console.log(`[Unique Session Initialized] Session Salt: ${SESSION_SALT}`);
     
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
         try {
@@ -22,13 +17,12 @@ window.addEventListener('DOMContentLoaded', async () => {
             
             if (capabilities.torch) {
                 useTorch = true;
-                desc.innerText = `Mode: Torch Enabled (Session ID: ${SESSION_SALT})`;
+                if (desc) desc.innerText = "Mode: Phone LED Flashlight Enabled";
                 return;
             }
         } catch (e) {}
     }
-    
-    desc.innerText = `Mode: Screen Flash Mode (Session ID: ${SESSION_SALT})`;
+    if (desc) desc.innerText = "Mode: Screen Flashlight Mode (Laptop/PC)";
 });
 
 async function setTorchState(state) {
@@ -39,20 +33,17 @@ async function setTorchState(state) {
     }
 }
 
-// Token generator now incorporates SHARED_SECRET + Precise Timestamp + Session Salt
 function generateToken() {
-    // Uses millisecond-level timestamp + unique session salt
-    const uniqueSeed = SHARED_SECRET + Date.now().toString() + SESSION_SALT;
+    const timeBucket = Math.floor(Date.now() / 30000);
+    const rawString = SHARED_SECRET + timeBucket;
     
     let hash = 0;
-    for (let i = 0; i < uniqueSeed.length; i++) {
-        hash = ((hash << 5) - hash) + uniqueSeed.charCodeAt(i);
+    for (let i = 0; i < rawString.length; i++) {
+        hash = ((hash << 5) - hash) + rawString.charCodeAt(i);
         hash |= 0;
     }
     
-    const binaryToken = (Math.abs(hash) & 0xFFFF).toString(2).padStart(16, '0');
-    console.log(`[Unique Pattern] Seed: ${uniqueSeed} => Token: ${binaryToken}`);
-    return binaryToken;
+    return (Math.abs(hash) & 0xFFFF).toString(2).padStart(16, '0');
 }
 
 let isTransmitting = false;
@@ -66,13 +57,12 @@ async function transmitToken() {
     const flashIcon = document.getElementById('flash-icon');
 
     isTransmitting = true;
-    btn.disabled = true;
+    if (btn) btn.disabled = true;
 
-    // Generates a brand new, unique token for this specific button press
     const payload = generateToken();
-    const fullBitStream = "1100" + payload + "0"; // Preamble (1100) + Data + Stop
+    const fullBitStream = "1100" + payload + "0"; // Preamble (1100) + Data + Stop Bit
     
-    status.innerText = `Transmitting Unique Token: ${payload}`;
+    if (status) status.innerText = `Transmitting: ${payload}`;
 
     let bitIndex = 0;
     let startTime = performance.now();
@@ -91,29 +81,32 @@ async function transmitToken() {
             
             if (useTorch) await setTorchState(isOn);
             
-            flashBox.style.backgroundColor = isOn ? "#FFFFFF" : "#000000";
-            flashIcon.style.color = isOn ? "#ffbb00" : "#222222";
-            flashIcon.style.transform = isOn ? "scale(1.2)" : "scale(1)";
+            if (flashBox) flashBox.style.backgroundColor = isOn ? "#FFFFFF" : "#000000";
+            if (flashIcon) {
+                flashIcon.style.color = isOn ? "#ffbb00" : "#222222";
+                flashIcon.style.transform = isOn ? "scale(1.2)" : "scale(1)";
+            }
 
             requestAnimationFrame(step);
         } else {
             if (useTorch) await setTorchState(false);
             
-            flashBox.style.backgroundColor = "#111111";
-            flashIcon.style.color = "#333333";
-            flashIcon.style.transform = "scale(1)";
+            if (flashBox) flashBox.style.backgroundColor = "#111111";
+            if (flashIcon) {
+                flashIcon.style.color = "#333333";
+                flashIcon.style.transform = "scale(1)";
+            }
             
-            status.innerText = "Transmission Complete!";
-            btn.disabled = false;
+            if (status) status.innerText = "Transmission Complete!";
+            if (btn) btn.disabled = false;
             isTransmitting = false;
         }
     }
 
     const firstBitOn = (fullBitStream[0] === '1');
     if (useTorch) await setTorchState(firstBitOn);
-    
-    flashBox.style.backgroundColor = firstBitOn ? "#FFFFFF" : "#000000";
-    flashIcon.style.color = firstBitOn ? "#ffbb00" : "#222222";
+    if (flashBox) flashBox.style.backgroundColor = firstBitOn ? "#FFFFFF" : "#000000";
+    if (flashIcon) flashIcon.style.color = firstBitOn ? "#ffbb00" : "#222222";
     
     requestAnimationFrame(step);
 }
