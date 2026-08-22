@@ -1,5 +1,5 @@
 const SHARED_SECRET = "MY_SECRET_KEY_123";
-const BIT_DURATION_MS = 150; // Synced timing interval
+const BIT_DURATION_MS = 150; // Expected duration of a single bit
 
 let video, canvas, ctx;
 let isRunning = false;
@@ -7,7 +7,11 @@ let isRunning = false;
 let minBrightness = 255;
 let maxBrightness = 0;
 let rawBitBuffer = "";
-let lastSampleTime = 0;
+
+// State tracking for pulse width measurement
+let currentBitState = "0";
+let lastStateChangeTime = 0;
+let isReceivingSignal = false;
 
 async function startReceiver() {
     video = document.getElementById('webcam');
@@ -27,7 +31,7 @@ async function startReceiver() {
 
         if (startBtn) startBtn.style.display = 'none';
         isRunning = true;
-        lastSampleTime = performance.now();
+        calibrateNoise();
         requestAnimationFrame(processFrame);
     } catch (err) {
         alert("Unable to access camera: " + err.message);
@@ -38,7 +42,11 @@ function calibrateNoise() {
     minBrightness = 255;
     maxBrightness = 0;
     rawBitBuffer = "";
-    document.getElementById('buffer-val').innerText = "...";
+    isReceivingSignal = false;
+    currentBitState = "0";
+    lastStateChangeTime = performance.now();
+    const bufDisp = document.getElementById('buffer-val');
+    if (bufDisp) bufDisp.innerText = "Waiting for start bit (1)...";
 }
 
 function generateExpectedToken() {
@@ -73,19 +81,36 @@ function processFrame(currentTime) {
 
         const range = maxBrightness - minBrightness;
         const threshold = minBrightness + (range * 0.5);
-        const currentBit = (range > 20 && avgBrightness > threshold) ? "1" : "0";
+        const sampledBit = (range > 20 && avgBrightness > threshold) ? "1" : "0";
 
         document.getElementById('light-val').innerText = Math.round(avgBrightness);
         document.getElementById('thresh-val').innerText = Math.round(threshold);
-        document.getElementById('bit-val').innerText = currentBit;
+        document.getElementById('bit-val').innerText = sampledBit;
 
-        if (currentTime - lastSampleTime >= BIT_DURATION_MS) {
-            lastSampleTime = currentTime;
-            rawBitBuffer += currentBit;
+        // Trigger reception only when the first '1' bit appears
+        if (!isReceivingSignal) {
+            if (sampledBit === "1") {
+                isReceivingSignal = true;
+                currentBitState = "1";
+                lastStateChangeTime = currentTime;
+                rawBitBuffer = "";
+            }
+            requestAnimationFrame(processFrame);
+            return;
+        }
 
-            if (rawBitBuffer.length > 30) rawBitBuffer = rawBitBuffer.slice(-30);
+        // Measure time spent in the current light state (1 or 0)
+        if (sampledBit !== currentBitState) {
+            const duration = currentTime - lastStateChangeTime;
+            const bitCount = Math.max(1, Math.round(duration / BIT_DURATION_MS));
+
+            rawBitBuffer += currentBitState.repeat(bitCount);
             document.getElementById('buffer-val').innerText = rawBitBuffer;
 
+            currentBitState = sampledBit;
+            lastStateChangeTime = currentTime;
+
+            // Check buffer for preamble (1100) and 16-bit payload
             const preambleIdx = rawBitBuffer.indexOf("1100");
             if (preambleIdx !== -1 && (rawBitBuffer.length - preambleIdx) >= 20) {
                 const capturedToken = rawBitBuffer.substring(preambleIdx + 4, preambleIdx + 20);
@@ -93,7 +118,6 @@ function processFrame(currentTime) {
 
                 const statusElement = document.getElementById('lock-status');
                 
-                // STRICT SECURITY: Validates captured token against time-bucket hash
                 if (capturedToken === expectedToken) {
                     statusElement.className = "unlocked";
                     statusElement.innerText = "ACCESS GRANTED! 🔓";
@@ -102,12 +126,13 @@ function processFrame(currentTime) {
                     statusElement.innerText = `INVALID KEY ❌\n(Recv: ${capturedToken})`;
                 }
 
-                rawBitBuffer = "";
                 setTimeout(() => {
                     statusElement.className = "";
                     statusElement.innerText = "LOCKED 🔒";
                     calibrateNoise();
                 }, 3000);
+                
+                return;
             }
         }
     }
