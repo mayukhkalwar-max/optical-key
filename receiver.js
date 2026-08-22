@@ -1,61 +1,14 @@
 const SHARED_SECRET = "MY_SECRET_KEY_123";
-const BIT_DURATION_MS = 200; // Matches transmitter bit duration
-const TOTAL_BITS = 19; // 2 preamble + 16 payload + 1 stop bit
 
-let video, canvas, ctx;
-let isRunning = false;
+// Create a direct inter-tab communication channel
+const channel = new BroadcastChannel('optical_key_channel');
 
-let baselineLight = 0;
-let bitStream = "";
-let lastSampleTime = 0;
-let isSampling = false;
-
-async function startReceiver() {
-    video = document.getElementById('webcam');
-    canvas = document.getElementById('analyzer-canvas');
-    ctx = canvas.getContext('2d', { willReadFrequently: true });
-    const startBtn = document.getElementById('start-btn');
-
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment', width: 640, height: 480 }
-        });
-        video.srcObject = stream;
-        await video.play();
-
-        canvas.width = 160;
-        canvas.height = 120;
-
-        if (startBtn) startBtn.style.display = 'none';
-        isRunning = true;
-        calibrateBaseline();
-        requestAnimationFrame(processFrame);
-    } catch (err) {
-        alert("Unable to access camera: " + err.message);
-    }
-}
-
-function calibrateBaseline() {
-    bitStream = "";
-    isSampling = false;
-    const bufDisp = document.getElementById('buffer-val');
-    if (bufDisp) bufDisp.innerText = "Calibrating baseline ambient light...";
-    
-    setTimeout(() => {
-        if (ctx && video) {
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const frameData = ctx.getImageData(70, 50, 20, 20).data;
-            let sum = 0;
-            for (let i = 0; i < frameData.length; i += 4) {
-                sum += (frameData[i] + frameData[i+1] + frameData[i+2]) / 3;
-            }
-            baselineLight = sum / (frameData.length / 4);
-            const threshDisp = document.getElementById('thresh-val');
-            if (threshDisp) threshDisp.innerText = Math.round(baselineLight + 20);
-            if (bufDisp) bufDisp.innerText = "Ready! Waiting for light pulse (Starts with 1)...";
-        }
-    }, 500);
-}
+let bitBuffer = "";
+let sensor = document.getElementById('sensor');
+let signalState = document.getElementById('signal-state');
+let bufferVal = document.getElementById('buffer-val');
+let decodedKey = document.getElementById('decoded-key');
+let lockStatus = document.getElementById('lock-status');
 
 function generateExpectedToken() {
     const timeBucket = Math.floor(Date.now() / 30000);
@@ -68,80 +21,56 @@ function generateExpectedToken() {
     return (Math.abs(hash) & 0xFFFF).toString(2).padStart(16, '0');
 }
 
-function processFrame(currentTime) {
-    if (!isRunning) return;
+// Listen to raw bit pulses sent from the transmitter
+channel.onmessage = (event) => {
+    const data = event.data;
 
-    if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    if (data.type === 'PULSE') {
+        const bit = data.bit;
+        const isOn = (bit === '1');
 
-        const frameData = ctx.getImageData(70, 50, 20, 20).data;
-        let sum = 0;
-        for (let i = 0; i < frameData.length; i += 4) {
-            sum += (frameData[i] + frameData[i+1] + frameData[i+2]) / 3;
-        }
-        const currentLight = sum / (frameData.length / 4);
+        // Update sensor UI state instantly
+        sensor.style.backgroundColor = isOn ? '#ffffff' : '#000000';
+        sensor.style.boxShadow = isOn ? '0 0 30px #ffbb00' : '0 0 10px rgba(0,0,0,0.5)';
+        signalState.innerText = isOn ? 'HIGH (1)' : 'LOW (0)';
 
-        const isLightOn = currentLight > (baselineLight + 20);
-        const currentBit = isLightOn ? "1" : "0";
+        // Append to received stream
+        bitBuffer += bit;
+        bufferVal.innerText = bitBuffer;
+    } 
+    else if (data.type === 'COMPLETE') {
+        // Evaluate collected bitstream
+        signalState.innerText = 'OFF (0)';
+        sensor.style.backgroundColor = '#000000';
+        sensor.style.boxShadow = '0 0 10px rgba(0,0,0,0.5)';
 
-        const lightDisp = document.getElementById('light-val');
-        const bitDisp = document.getElementById('bit-val');
-        if (lightDisp) lightDisp.innerText = Math.round(currentLight);
-        if (bitDisp) bitDisp.innerText = currentBit;
+        // Look for Sync Preamble (1100) + 16-bit Payload
+        const preambleIdx = bitBuffer.indexOf("1100");
+        if (preambleIdx !== -1 && (bitBuffer.length - preambleIdx) >= 20) {
+            const capturedToken = bitBuffer.substring(preambleIdx + 4, preambleIdx + 20);
+            const expectedToken = generateExpectedToken();
 
-        // Triggers strictly on the first "1" bit pulse
-        if (!isSampling) {
-            if (currentBit === "1") {
-                isSampling = true;
-                bitStream = "1"; // Strictly starts with "1"
-                lastSampleTime = currentTime;
-                
-                const bufDisp = document.getElementById('buffer-val');
-                if (bufDisp) bufDisp.innerText = bitStream;
+            decodedKey.innerText = capturedToken;
+
+            if (capturedToken === expectedToken) {
+                lockStatus.className = "unlocked";
+                lockStatus.innerText = "ACCESS GRANTED! 🔓";
+            } else {
+                lockStatus.className = "invalid";
+                lockStatus.innerText = "INVALID KEY ❌";
             }
         } else {
-            // Clocked sampling loop
-            if (currentTime - lastSampleTime >= BIT_DURATION_MS) {
-                lastSampleTime = currentTime;
-                bitStream += currentBit;
-
-                const bufDisp = document.getElementById('buffer-val');
-                if (bufDisp) bufDisp.innerText = bitStream;
-
-                // Stop once full packet is collected
-                if (bitStream.length >= TOTAL_BITS) {
-                    verifyStream(bitStream);
-                    isSampling = false;
-                }
-            }
+            lockStatus.className = "invalid";
+            lockStatus.innerText = "SIGNAL CORRUPTED ❌";
         }
+
+        // Auto-reset receiver after 3 seconds
+        setTimeout(() => {
+            bitBuffer = "";
+            bufferVal.innerText = "...";
+            decodedKey.innerText = "NONE";
+            lockStatus.className = "";
+            lockStatus.innerText = "LOCKED 🔒";
+        }, 3000);
     }
-    requestAnimationFrame(processFrame);
-}
-
-function verifyStream(stream) {
-    const statusElement = document.getElementById('lock-status');
-    
-    // Expect header "11" followed by 16 bits data
-    if (stream.startsWith("11") && stream.length >= 18) {
-        const capturedToken = stream.substring(2, 18);
-        const expectedToken = generateExpectedToken();
-
-        if (capturedToken === expectedToken) {
-            statusElement.className = "unlocked";
-            statusElement.innerText = "ACCESS GRANTED! 🔓";
-        } else {
-            statusElement.className = "invalid";
-            statusElement.innerText = `INVALID KEY ❌\n(Recv: ${capturedToken})`;
-        }
-    } else {
-        statusElement.className = "invalid";
-        statusElement.innerText = "SIGNAL ERROR ❌\n(Sync Header Missed)";
-    }
-
-    setTimeout(() => {
-        statusElement.className = "";
-        statusElement.innerText = "LOCKED 🔒";
-        calibrateBaseline();
-    }, 3000);
-}
+};
