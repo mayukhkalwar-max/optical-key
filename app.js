@@ -10,7 +10,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: 'environment' }
+                v
             });
             track = stream.getVideoTracks()[0];
             const capabilities = track.getCapabilities();
