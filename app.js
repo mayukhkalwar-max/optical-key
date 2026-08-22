@@ -4,11 +4,14 @@ const BIT_DURATION_MS = 100; // 100ms per bit = 10 Hz
 let track = null;
 let useTorch = false;
 
+// Generate a random unique Session Salt EVERY TIME the page opens/refreshes
+const SESSION_SALT = Math.floor(Math.random() * 65536).toString(16).padStart(4, '0');
+
 // Auto-detect hardware capability on page load
 window.addEventListener('DOMContentLoaded', async () => {
     const desc = document.getElementById('mode-desc');
+    console.log(`[Unique Session Initialized] Session Salt: ${SESSION_SALT}`);
     
-    // Check if device mediaCapabilities support torch
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
@@ -19,15 +22,13 @@ window.addEventListener('DOMContentLoaded', async () => {
             
             if (capabilities.torch) {
                 useTorch = true;
-                desc.innerText = "Mode: Phone LED Flashlight Enabled";
+                desc.innerText = `Mode: Torch Enabled (Session ID: ${SESSION_SALT})`;
                 return;
             }
-        } catch (e) {
-            // Flashlight unavailable or denied
-        }
+        } catch (e) {}
     }
     
-    desc.innerText = "Mode: Screen Flashlight Mode (Laptop/PC)";
+    desc.innerText = `Mode: Screen Flash Mode (Session ID: ${SESSION_SALT})`;
 });
 
 async function setTorchState(state) {
@@ -38,17 +39,20 @@ async function setTorchState(state) {
     }
 }
 
+// Token generator now incorporates SHARED_SECRET + Precise Timestamp + Session Salt
 function generateToken() {
-    const timeBucket = Math.floor(Date.now() / 30000);
-    const rawString = SHARED_SECRET + timeBucket;
+    // Uses millisecond-level timestamp + unique session salt
+    const uniqueSeed = SHARED_SECRET + Date.now().toString() + SESSION_SALT;
     
     let hash = 0;
-    for (let i = 0; i < rawString.length; i++) {
-        hash = ((hash << 5) - hash) + rawString.charCodeAt(i);
+    for (let i = 0; i < uniqueSeed.length; i++) {
+        hash = ((hash << 5) - hash) + uniqueSeed.charCodeAt(i);
         hash |= 0;
     }
     
-    return (Math.abs(hash) & 0xFFFF).toString(2).padStart(16, '0');
+    const binaryToken = (Math.abs(hash) & 0xFFFF).toString(2).padStart(16, '0');
+    console.log(`[Unique Pattern] Seed: ${uniqueSeed} => Token: ${binaryToken}`);
+    return binaryToken;
 }
 
 let isTransmitting = false;
@@ -64,10 +68,11 @@ async function transmitToken() {
     isTransmitting = true;
     btn.disabled = true;
 
+    // Generates a brand new, unique token for this specific button press
     const payload = generateToken();
     const fullBitStream = "1100" + payload + "0"; // Preamble (1100) + Data + Stop
     
-    status.innerText = `Transmitting: ${payload}`;
+    status.innerText = `Transmitting Unique Token: ${payload}`;
 
     let bitIndex = 0;
     let startTime = performance.now();
@@ -84,19 +89,14 @@ async function transmitToken() {
             const currentBit = fullBitStream[bitIndex];
             const isOn = (currentBit === '1');
             
-            // 1. Trigger Physical Torch (if on phone)
-            if (useTorch) {
-                await setTorchState(isOn);
-            }
+            if (useTorch) await setTorchState(isOn);
             
-            // 2. Trigger Screen Visuals (for Laptop or backup display)
             flashBox.style.backgroundColor = isOn ? "#FFFFFF" : "#000000";
             flashIcon.style.color = isOn ? "#ffbb00" : "#222222";
             flashIcon.style.transform = isOn ? "scale(1.2)" : "scale(1)";
 
             requestAnimationFrame(step);
         } else {
-            // Turn off hardware & reset screen UI
             if (useTorch) await setTorchState(false);
             
             flashBox.style.backgroundColor = "#111111";
@@ -109,7 +109,6 @@ async function transmitToken() {
         }
     }
 
-    // Fire first frame
     const firstBitOn = (fullBitStream[0] === '1');
     if (useTorch) await setTorchState(firstBitOn);
     
