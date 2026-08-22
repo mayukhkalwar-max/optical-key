@@ -2,47 +2,78 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Optical Smart Lock Transmitter</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Universal Optical Key</title>
     <style>
+        * { box-sizing: border-box; }
         body {
-            font-family: Arial, sans-serif;
-            background-color: #121212;
-            color: white;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #050505;
+            color: #ffffff;
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
+            justify-content: space-between;
             height: 100vh;
             margin: 0;
+            padding: 24px;
         }
+        .header { text-align: center; }
+        .header h2 { margin: 0; font-size: 22px; color: #ffbb00; }
+        .header p { margin: 6px 0 0; font-size: 13px; color: #aaa; }
+        
         #flash-box {
-            width: 250px;
-            height: 250px;
-            background-color: black;
-            border: 4px solid #333;
-            border-radius: 12px;
-            margin-bottom: 20px;
+            width: 70vw;
+            height: 70vw;
+            max-width: 280px;
+            max-height: 280px;
+            background-color: #111111;
+            border: 4px solid #333333;
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.03s linear;
         }
+        
+        #flash-icon {
+            font-size: 70px;
+            color: #333;
+            transition: transform 0.05s ease, color 0.05s ease;
+        }
+        
+        .controls { width: 100%; max-width: 320px; text-align: center; }
         button {
-            padding: 14px 28px;
+            width: 100%;
+            padding: 18px;
             font-size: 18px;
             font-weight: bold;
-            color: white;
-            background-color: #007bff;
+            color: #000;
+            background-color: #ffbb00;
             border: none;
-            border-radius: 8px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(255, 187, 0, 0.3);
             cursor: pointer;
         }
-        button:hover { background-color: #0056b3; }
-        #status { margin-top: 15px; font-size: 14px; color: #aaa; }
+        button:disabled { opacity: 0.5; }
+        #status { margin-top: 14px; font-size: 13px; color: #bbb; word-break: break-all; }
     </style>
 </head>
 <body>
 
-    <div id="flash-box"></div>
-    <button onclick="transmitToken()">Transmit Optical Key</button>
-    <div id="status">Status: Idle</div>
+    <div class="header">
+        <h2>Universal Optical Key</h2>
+        <p id="mode-desc">Detecting hardware capability...</p>
+    </div>
+
+    <div id="flash-box">
+        <div id="flash-icon">⚡</div>
+    </div>
+
+    <div class="controls">
+        <button id="tx-btn" onclick="transmitToken()">Transmit Optical Key</button>
+        <div id="status">Status: Ready</div>
+    </div>
 
     <script src="app.js"></script>
 </body>
