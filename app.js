@@ -1,9 +1,14 @@
 const SHARED_SECRET = "MY_SECRET_KEY_123";
-const BIT_DURATION_MS = 200; // Increased to 200ms for reliable camera detection
+const BIT_DURATION_MS = 100; // High-precision 100ms bit interval
 
 let track = null;
 let useTorch = false;
+let isTransmitting = false;
 
+// Inter-tab communication channel for direct software-to-software simulation
+const channel = new BroadcastChannel('optical_key_channel');
+
+// Detect hardware capabilities (LED Flashlight vs Screen Flash) on load
 window.addEventListener('DOMContentLoaded', async () => {
     const desc = document.getElementById('mode-desc');
     
@@ -20,19 +25,25 @@ window.addEventListener('DOMContentLoaded', async () => {
                 if (desc) desc.innerText = "Mode: Phone LED Flashlight Enabled";
                 return;
             }
-        } catch (e) {}
+        } catch (e) {
+            console.log("Hardware torch access unavailable, using screen mode.");
+        }
     }
     if (desc) desc.innerText = "Mode: Screen Flashlight Mode (Laptop/PC)";
 });
 
+// Controls physical phone LED torch
 async function setTorchState(state) {
     if (useTorch && track) {
         try {
             await track.applyConstraints({ advanced: [{ torch: state }] });
-        } catch (e) {}
+        } catch (e) {
+            console.error("Torch error:", e);
+        }
     }
 }
 
+// Generates 16-bit time-bucketed TOTP hash
 function generateToken() {
     const timeBucket = Math.floor(Date.now() / 30000);
     const rawString = SHARED_SECRET + timeBucket;
@@ -46,8 +57,7 @@ function generateToken() {
     return (Math.abs(hash) & 0xFFFF).toString(2).padStart(16, '0');
 }
 
-let isTransmitting = false;
-
+// Main transmission sequence
 async function transmitToken() {
     if (isTransmitting) return;
 
@@ -60,53 +70,49 @@ async function transmitToken() {
     if (btn) btn.disabled = true;
 
     const payload = generateToken();
-    const fullBitStream = "11" + payload + "0"; // Sync Header (11) + 16-bit Payload + Stop Bit
+    const fullBitStream = "1100" + payload + "0"; // Sync Preamble (1100) + 16-Bit Payload + Stop Bit (0)
     
     if (status) status.innerText = `Transmitting: ${payload}`;
 
     let bitIndex = 0;
-    let startTime = performance.now();
 
-    async function step(currentTime) {
-        let elapsed = currentTime - startTime;
-
-        if (elapsed >= BIT_DURATION_MS) {
-            startTime = currentTime;
-            bitIndex++;
-        }
-
+    const timer = setInterval(async () => {
         if (bitIndex < fullBitStream.length) {
             const currentBit = fullBitStream[bitIndex];
             const isOn = (currentBit === '1');
-            
+
+            // Send real-time bit event to receiver.js
+            channel.postMessage({ type: 'PULSE', bit: currentBit });
+
+            // Toggle hardware torch
             if (useTorch) await setTorchState(isOn);
-            
+
+            // Toggle UI Flash Box
             if (flashBox) flashBox.style.backgroundColor = isOn ? "#FFFFFF" : "#000000";
             if (flashIcon) {
                 flashIcon.style.color = isOn ? "#ffbb00" : "#222222";
                 flashIcon.style.transform = isOn ? "scale(1.2)" : "scale(1)";
             }
 
-            requestAnimationFrame(step);
+            bitIndex++;
         } else {
-            if (useTorch) await setTorchState(false);
+            clearInterval(timer);
             
+            // Turn off torch & reset UI state
+            if (useTorch) await setTorchState(false);
+
             if (flashBox) flashBox.style.backgroundColor = "#111111";
             if (flashIcon) {
                 flashIcon.style.color = "#333333";
                 flashIcon.style.transform = "scale(1)";
             }
-            
+
             if (status) status.innerText = "Transmission Complete!";
             if (btn) btn.disabled = false;
             isTransmitting = false;
-        }
-    }
 
-    const firstBitOn = (fullBitStream[0] === '1');
-    if (useTorch) await setTorchState(firstBitOn);
-    if (flashBox) flashBox.style.backgroundColor = firstBitOn ? "#FFFFFF" : "#000000";
-    if (flashIcon) flashIcon.style.color = firstBitOn ? "#ffbb00" : "#222222";
-    
-    requestAnimationFrame(step);
+            // Signal stream completion to receiver
+            channel.postMessage({ type: 'COMPLETE' });
+        }
+    }, BIT_DURATION_MS);
 }
