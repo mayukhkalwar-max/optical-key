@@ -118,7 +118,7 @@
 <body>
 
     <h2>Optical Receiver Simulator</h2>
-    <p>Align the flashing light inside the green target box</p>
+    <p>Align the light source inside the green target box</p>
 
     <div class="video-container">
         <video id="webcam" autoplay playsinline muted></video>
@@ -135,7 +135,7 @@
             <span id="light-val" class="stat-value">0</span>
         </div>
         <div class="stat-card">
-            <span>Adaptive Threshold:</span>
+            <span>Trigger Threshold:</span>
             <span id="thresh-val" class="stat-value">0</span>
         </div>
         <div class="stat-card">
@@ -149,7 +149,7 @@
     </div>
 
     <button id="start-btn" onclick="startReceiver()">Start Camera Receiver</button>
-    <button class="btn-reset" onclick="calibrateNoise()">Reset / Calibrate Light</button>
+    <button class="btn-reset" onclick="calibrateBaseline()">Recalibrate Light Baseline</button>
 
     <script src="receiver.js"></script>
 </body>
