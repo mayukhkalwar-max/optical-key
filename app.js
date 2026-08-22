@@ -1,120 +1,56 @@
 const SHARED_SECRET = "MY_SECRET_KEY_123";
-const BIT_DURATION_MS = 100; // 100ms per bit = 10 Hz
-
-let track = null;
-let useTorch = false;
-
-// Auto-detect hardware capability on page load
-window.addEventListener('DOMContentLoaded', async () => {
-    const desc = document.getElementById('mode-desc');
-    
-    // Check if device mediaCapabilities support torch
-    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: 'environment' }
-            });
-            track = stream.getVideoTracks()[0];
-            const capabilities = track.getCapabilities();
-            
-            if (capabilities.torch) {
-                useTorch = true;
-                desc.innerText = "Mode: Phone LED Flashlight Enabled";
-                return;
-            }
-        } catch (e) {
-            // Flashlight unavailable or denied
-        }
-    }
-    
-    desc.innerText = "Mode: Screen Flashlight Mode (Laptop/PC)";
-});
-
-async function setTorchState(state) {
-    if (useTorch && track) {
-        try {
-            await track.applyConstraints({ advanced: [{ torch: state }] });
-        } catch (e) {}
-    }
-}
+const BIT_DURATION_MS = 100; // 100ms per bit = 10 Hz transmission
 
 function generateToken() {
-    const timeBucket = Math.floor(Date.now() / 30000);
+    const timeBucket = Math.floor(Date.now() / 30000); // Changes every 30 seconds
     const rawString = SHARED_SECRET + timeBucket;
     
     let hash = 0;
     for (let i = 0; i < rawString.length; i++) {
         hash = ((hash << 5) - hash) + rawString.charCodeAt(i);
-        hash |= 0;
+        hash |= 0; // Convert to 32-bit integer
     }
     
-    return (Math.abs(hash) & 0xFFFF).toString(2).padStart(16, '0');
+    // Take lower 16 bits and convert to binary string
+    let binaryToken = (Math.abs(hash) & 0xFFFF).toString(2).padStart(16, '0');
+
+    // --- DEBUG LOGS FOR F12 CONSOLE ---
+    console.log("-----------------------------------------");
+    console.log("Current Time Bucket:", timeBucket);
+    console.log("Generated 16-Bit Token:", binaryToken);
+    
+    return binaryToken;
 }
 
-let isTransmitting = false;
-
-async function transmitToken() {
-    if (isTransmitting) return;
-
-    const status = document.getElementById('status');
-    const btn = document.getElementById('tx-btn');
+function transmitToken() {
     const flashBox = document.getElementById('flash-box');
-    const flashIcon = document.getElementById('flash-icon');
-
-    isTransmitting = true;
-    btn.disabled = true;
-
+    const status = document.getElementById('status');
+    
     const payload = generateToken();
-    const fullBitStream = "1100" + payload + "0"; // Preamble (1100) + Data + Stop
     
-    status.innerText = `Transmitting: ${payload}`;
-
+    // Framing Structure:
+    // Preamble: 1 1 0 0 (Sync header to calibrate ESP32 clock)
+    // Data: 16-bit binary token
+    // Stop Bit: 0 (Solid Black)
+    const fullBitStream = "1100" + payload + "0";
+    
+    console.log("Full Transmission Stream (With Preamble):", fullBitStream);
+    status.innerText = `Transmitting Payload: ${payload}`;
+    
     let bitIndex = 0;
-    let startTime = performance.now();
-
-    async function step(currentTime) {
-        let elapsed = currentTime - startTime;
-
-        if (elapsed >= BIT_DURATION_MS) {
-            startTime = currentTime;
-            bitIndex++;
-        }
-
-        if (bitIndex < fullBitStream.length) {
-            const currentBit = fullBitStream[bitIndex];
-            const isOn = (currentBit === '1');
-            
-            // 1. Trigger Physical Torch (if on phone)
-            if (useTorch) {
-                await setTorchState(isOn);
-            }
-            
-            // 2. Trigger Screen Visuals (for Laptop or backup display)
-            flashBox.style.backgroundColor = isOn ? "#FFFFFF" : "#000000";
-            flashIcon.style.color = isOn ? "#ffbb00" : "#222222";
-            flashIcon.style.transform = isOn ? "scale(1.2)" : "scale(1)";
-
-            requestAnimationFrame(step);
-        } else {
-            // Turn off hardware & reset screen UI
-            if (useTorch) await setTorchState(false);
-            
-            flashBox.style.backgroundColor = "#111111";
-            flashIcon.style.color = "#333333";
-            flashIcon.style.transform = "scale(1)";
-            
+    
+    const interval = setInterval(() => {
+        if (bitIndex >= fullBitStream.length) {
+            clearInterval(interval);
+            flashBox.style.backgroundColor = 'black'; // Reset to black
             status.innerText = "Transmission Complete!";
-            btn.disabled = false;
-            isTransmitting = false;
+            console.log("Status: Transmission Finished.");
+            return;
         }
-    }
-
-    // Fire first frame
-    const firstBitOn = (fullBitStream[0] === '1');
-    if (useTorch) await setTorchState(firstBitOn);
-    
-    flashBox.style.backgroundColor = firstBitOn ? "#FFFFFF" : "#000000";
-    flashIcon.style.color = firstBitOn ? "#ffbb00" : "#222222";
-    
-    requestAnimationFrame(step);
+        
+        const currentBit = fullBitStream[bitIndex];
+        flashBox.style.backgroundColor = (currentBit === '1') ? 'white' : 'black';
+        
+        bitIndex++;
+    }, BIT_DURATION_MS);
 }
