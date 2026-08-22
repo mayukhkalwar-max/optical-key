@@ -11,7 +11,7 @@ let lastSampleTime = 0;
 let isSampling = false;
 
 async function startReceiver() {
-    video = document.getEle
+    video = document.getElementById('webcam');
     canvas = document.getElementById('analyzer-canvas');
     ctx = canvas.getContext('2d', { willReadFrequently: true });
     const startBtn = document.getElementById('start-btn');
