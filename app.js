@@ -2,38 +2,39 @@ const SHARED_SECRET = "MY_SECRET_KEY_123";
 const BIT_DURATION_MS = 100; // 100ms per bit = 10 Hz
 
 let track = null;
+let useTorch = false;
 
-// Initialize Flashlight hardware via browser camera API
-async function initTorch() {
-    if (track) return true;
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment' } // Access rear camera
-        });
-        track = stream.getVideoTracks()[0];
-        
-        // Check if device hardware supports Torch
-        const capabilities = track.getCapabilities();
-        if (!capabilities.torch) {
-            alert("Your device flashlight/torch is not accessible via Web browser.");
-            return false;
+// Auto-detect hardware capability on page load
+window.addEventListener('DOMContentLoaded', async () => {
+    const desc = document.getElementById('mode-desc');
+    
+    // Check if device mediaCapabilities support torch
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment' }
+            });
+            track = stream.getVideoTracks()[0];
+            const capabilities = track.getCapabilities();
+            
+            if (capabilities.torch) {
+                useTorch = true;
+                desc.innerText = "Mode: Phone LED Flashlight Enabled";
+                return;
+            }
+        } catch (e) {
+            // Flashlight unavailable or denied
         }
-        return true;
-    } catch (err) {
-        alert("Camera permission denied or torch unavailable: " + err.message);
-        return false;
     }
-}
+    
+    desc.innerText = "Mode: Screen Flashlight Mode (Laptop/PC)";
+});
 
 async function setTorchState(state) {
-    if (track) {
+    if (useTorch && track) {
         try {
-            await track.applyConstraints({
-                advanced: [{ torch: state }]
-            });
-        } catch (e) {
-            console.error("Torch error:", e);
-        }
+            await track.applyConstraints({ advanced: [{ torch: state }] });
+        } catch (e) {}
     }
 }
 
@@ -57,14 +58,8 @@ async function transmitToken() {
 
     const status = document.getElementById('status');
     const btn = document.getElementById('tx-btn');
+    const flashBox = document.getElementById('flash-box');
     const flashIcon = document.getElementById('flash-icon');
-
-    status.innerText = "Accessing hardware torch...";
-    const torchReady = await initTorch();
-    if (!torchReady) {
-        status.innerText = "Error: Hardware torch unavailable";
-        return;
-    }
 
     isTransmitting = true;
     btn.disabled = true;
@@ -72,7 +67,7 @@ async function transmitToken() {
     const payload = generateToken();
     const fullBitStream = "1100" + payload + "0"; // Preamble (1100) + Data + Stop
     
-    status.innerText = `Flashing Token: ${payload}`;
+    status.innerText = `Transmitting: ${payload}`;
 
     let bitIndex = 0;
     let startTime = performance.now();
@@ -89,16 +84,24 @@ async function transmitToken() {
             const currentBit = fullBitStream[bitIndex];
             const isOn = (currentBit === '1');
             
-            await setTorchState(isOn);
-            flashIcon.style.transform = isOn ? "scale(1.3)" : "scale(1)";
-            flashIcon.style.color = isOn ? "#ffbb00" : "#333333";
+            // 1. Trigger Physical Torch (if on phone)
+            if (useTorch) {
+                await setTorchState(isOn);
+            }
+            
+            // 2. Trigger Screen Visuals (for Laptop or backup display)
+            flashBox.style.backgroundColor = isOn ? "#FFFFFF" : "#000000";
+            flashIcon.style.color = isOn ? "#ffbb00" : "#222222";
+            flashIcon.style.transform = isOn ? "scale(1.2)" : "scale(1)";
 
             requestAnimationFrame(step);
         } else {
-            // Turn flashlight OFF at the end
-            await setTorchState(false);
+            // Turn off hardware & reset screen UI
+            if (useTorch) await setTorchState(false);
+            
+            flashBox.style.backgroundColor = "#111111";
+            flashIcon.style.color = "#333333";
             flashIcon.style.transform = "scale(1)";
-            flashIcon.style.color = "#ffbb00";
             
             status.innerText = "Transmission Complete!";
             btn.disabled = false;
@@ -106,8 +109,12 @@ async function transmitToken() {
         }
     }
 
-    // Fire initial bit
+    // Fire first frame
     const firstBitOn = (fullBitStream[0] === '1');
-    await setTorchState(firstBitOn);
+    if (useTorch) await setTorchState(firstBitOn);
+    
+    flashBox.style.backgroundColor = firstBitOn ? "#FFFFFF" : "#000000";
+    flashIcon.style.color = firstBitOn ? "#ffbb00" : "#222222";
+    
     requestAnimationFrame(step);
 }
