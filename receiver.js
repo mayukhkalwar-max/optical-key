@@ -1,17 +1,14 @@
 const SHARED_SECRET = "MY_SECRET_KEY_123";
-const BIT_DURATION_MS = 150; // Expected duration of a single bit
 
 let video, canvas, ctx;
 let isRunning = false;
 
 let minBrightness = 255;
 let maxBrightness = 0;
-let rawBitBuffer = "";
 
-// State tracking for pulse width measurement
-let currentBitState = "0";
-let lastStateChangeTime = 0;
-let isReceivingSignal = false;
+// Pulse Tracking Engine
+let samples = [];
+let isCapturing = false;
 
 async function startReceiver() {
     video = document.getElementById('webcam');
@@ -41,12 +38,10 @@ async function startReceiver() {
 function calibrateNoise() {
     minBrightness = 255;
     maxBrightness = 0;
-    rawBitBuffer = "";
-    isReceivingSignal = false;
-    currentBitState = "0";
-    lastStateChangeTime = performance.now();
+    samples = [];
+    isCapturing = false;
     const bufDisp = document.getElementById('buffer-val');
-    if (bufDisp) bufDisp.innerText = "Waiting for start bit (1)...";
+    if (bufDisp) bufDisp.innerText = "Waiting for flash sequence...";
 }
 
 function generateExpectedToken() {
@@ -81,60 +76,86 @@ function processFrame(currentTime) {
 
         const range = maxBrightness - minBrightness;
         const threshold = minBrightness + (range * 0.5);
-        const sampledBit = (range > 20 && avgBrightness > threshold) ? "1" : "0";
+        const currentBit = (range > 20 && avgBrightness > threshold) ? 1 : 0;
 
         document.getElementById('light-val').innerText = Math.round(avgBrightness);
         document.getElementById('thresh-val').innerText = Math.round(threshold);
-        document.getElementById('bit-val').innerText = sampledBit;
+        document.getElementById('bit-val').innerText = currentBit;
 
-        // Trigger reception only when the first '1' bit appears
-        if (!isReceivingSignal) {
-            if (sampledBit === "1") {
-                isReceivingSignal = true;
-                currentBitState = "1";
-                lastStateChangeTime = currentTime;
-                rawBitBuffer = "";
-            }
-            requestAnimationFrame(processFrame);
-            return;
+        // Trigger on light pulse rising edge
+        if (!isCapturing && currentBit === 1) {
+            isCapturing = true;
+            samples = [];
         }
 
-        // Measure time spent in the current light state (1 or 0)
-        if (sampledBit !== currentBitState) {
-            const duration = currentTime - lastStateChangeTime;
-            const bitCount = Math.max(1, Math.round(duration / BIT_DURATION_MS));
+        if (isCapturing) {
+            samples.push({ bit: currentBit, time: currentTime });
 
-            rawBitBuffer += currentBitState.repeat(bitCount);
-            document.getElementById('buffer-val').innerText = rawBitBuffer;
-
-            currentBitState = sampledBit;
-            lastStateChangeTime = currentTime;
-
-            // Check buffer for preamble (1100) and 16-bit payload
-            const preambleIdx = rawBitBuffer.indexOf("1100");
-            if (preambleIdx !== -1 && (rawBitBuffer.length - preambleIdx) >= 20) {
-                const capturedToken = rawBitBuffer.substring(preambleIdx + 4, preambleIdx + 20);
-                const expectedToken = generateExpectedToken();
-
-                const statusElement = document.getElementById('lock-status');
-                
-                if (capturedToken === expectedToken) {
-                    statusElement.className = "unlocked";
-                    statusElement.innerText = "ACCESS GRANTED! 🔓";
-                } else {
-                    statusElement.className = "invalid";
-                    statusElement.innerText = `INVALID KEY ❌\n(Recv: ${capturedToken})`;
-                }
-
-                setTimeout(() => {
-                    statusElement.className = "";
-                    statusElement.innerText = "LOCKED 🔒";
-                    calibrateNoise();
-                }, 3000);
-                
-                return;
+            // Automatically analyze once enough raw frame samples are collected (~4 seconds)
+            if (samples.length >= 75) {
+                decodeCapturedStream();
+                isCapturing = false;
             }
         }
     }
     requestAnimationFrame(processFrame);
+}
+
+function decodeCapturedStream() {
+    // 1. Identify state transitions (Edge detection)
+    let transitions = [];
+    for (let i = 1; i < samples.length; i++) {
+        if (samples[i].bit !== samples[i - 1].bit) {
+            transitions.push(samples[i].time);
+        }
+    }
+
+    if (transitions.length < 4) {
+        calibrateNoise();
+        return;
+    }
+
+    // 2. Auto-calculate Bit Clock Speed from the preamble duration
+    let bitDurationEstimate = (transitions[2] - transitions[0]) / 2; // Duration of '11' preamble
+    if (bitDurationEstimate < 80 || bitDurationEstimate > 300) bitDurationEstimate = 150;
+
+    // 3. Resample at estimated bit center points
+    let decodedBits = "";
+    let startTime = samples[0].time;
+    let endTime = samples[samples.length - 1].time;
+
+    for (let t = startTime + (bitDurationEstimate / 2); t < endTime; t += bitDurationEstimate) {
+        // Find closest sample in time
+        let closestSample = samples.reduce((prev, curr) => 
+            Math.abs(curr.time - t) < Math.abs(prev.time - t) ? curr : prev
+        );
+        decodedBits += closestSample.bit;
+    }
+
+    document.getElementById('buffer-val').innerText = decodedBits;
+
+    // 4. Verify decoded binary payload
+    const preambleIdx = decodedBits.indexOf("1100");
+    if (preambleIdx !== -1 && (decodedBits.length - preambleIdx) >= 20) {
+        const capturedToken = decodedBits.substring(preambleIdx + 4, preambleIdx + 20);
+        const expectedToken = generateExpectedToken();
+
+        const statusElement = document.getElementById('lock-status');
+        
+        if (capturedToken === expectedToken) {
+            statusElement.className = "unlocked";
+            statusElement.innerText = "ACCESS GRANTED! 🔓";
+        } else {
+            statusElement.className = "invalid";
+            statusElement.innerText = `INVALID KEY ❌\n(Recv: ${capturedToken})`;
+        }
+
+        setTimeout(() => {
+            statusElement.className = "";
+            statusElement.innerText = "LOCKED 🔒";
+            calibrateNoise();
+        }, 3000);
+    } else {
+        calibrateNoise();
+    }
 }
