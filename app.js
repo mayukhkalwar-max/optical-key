@@ -1,11 +1,11 @@
 const SHARED_SECRET = "MY_SECRET_KEY_123";
-const BIT_DURATION_MS = 100; // High-precision 100ms bit interval
+const BIT_DURATION_MS = 100; // Precision 100ms interval
 
 let track = null;
 let useTorch = false;
 let isTransmitting = false;
 
-// Inter-tab communication channel for direct software-to-software simulation
+// Inter-tab communication channel for direct simulation
 const channel = new BroadcastChannel('optical_key_channel');
 
 // Detect hardware capabilities (LED Flashlight vs Screen Flash) on load
@@ -43,7 +43,7 @@ async function setTorchState(state) {
     }
 }
 
-// Generates 16-bit time-bucketed TOTP hash
+// Generates 20-bit time-bucketed TOTP hash
 function generateToken() {
     const timeBucket = Math.floor(Date.now() / 30000);
     const rawString = SHARED_SECRET + timeBucket;
@@ -54,7 +54,8 @@ function generateToken() {
         hash |= 0;
     }
     
-    return (Math.abs(hash) & 0xFFFF).toString(2).padStart(16, '0');
+    // 0xFFFFF bitmask extracts 20 bits (padded to 20 binary digits)
+    return (Math.abs(hash) & 0xFFFFF).toString(2).padStart(20, '0');
 }
 
 // Main transmission sequence
@@ -70,7 +71,7 @@ async function transmitToken() {
     if (btn) btn.disabled = true;
 
     const payload = generateToken();
-    const fullBitStream = "1100" + payload + "0"; // Sync Preamble (1100) + 16-Bit Payload + Stop Bit (0)
+    const fullBitStream = "1100" + payload + "0"; // Sync Preamble (1100) + 20-Bit Payload + Stop Bit (0)
     
     if (status) status.innerText = `Transmitting: ${payload}`;
 
