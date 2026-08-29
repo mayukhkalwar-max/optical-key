@@ -1,12 +1,16 @@
 const SHARED_SECRET = "MY_SECRET_KEY_123";
-const DEVICE_LOCK_ID = "LOCK_01"; // Set to "LOCK_01" or "LOCK_02"
-const BRIGHTNESS_THRESHOLD = 200; 
-const BIT_SAMPLE_INTERVAL_MS = 200; // Matches transmitter rate (200ms)
+const DEVICE_LOCK_ID = "LOCK_01"; 
+
+const BIT_DURATION_MS = 194; 
 
 let isReadingPayload = false;
 let bitBuffer = "";
 let payloadBuffer = "";
 let lastSampleTime = 0;
+
+// Dynamic Ambient Floor Thresholding
+let minObservedBrightness = 255;
+let maxObservedBrightness = 0;
 
 const video = document.getElementById('webcam');
 const canvas = document.getElementById('canvas');
@@ -31,6 +35,7 @@ function processVideoFrame(timestamp) {
         canvas.height = video.videoHeight;
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
+        // Target center region of camera
         const frameData = ctx.getImageData(canvas.width / 4, canvas.height / 4, canvas.width / 2, canvas.height / 2).data;
         let totalBrightness = 0;
         for (let i = 0; i < frameData.length; i += 4) {
@@ -38,30 +43,38 @@ function processVideoFrame(timestamp) {
         }
         const avgBrightness = totalBrightness / (frameData.length / 4);
 
-        const currentBit = avgBrightness > BRIGHTNESS_THRESHOLD ? '1' : '0';
+        // Auto-calibrate brightness range
+        if (avgBrightness < minObservedBrightness) minObservedBrightness = avgBrightness;
+        if (avgBrightness > maxObservedBrightness) maxObservedBrightness = avgBrightness;
+        
+        // Midpoint thresholding adapts to ambient room lighting
+        const dynamicThreshold = (minObservedBrightness + maxObservedBrightness) / 2;
+        const currentBit = (avgBrightness > dynamicThreshold && (maxObservedBrightness - minObservedBrightness > 30)) ? '1' : '0';
 
-        if (timestamp - lastSampleTime >= BIT_SAMPLE_INTERVAL_MS) {
+        if (timestamp - lastSampleTime >= BIT_DURATION_MS) {
             lastSampleTime = timestamp;
-            sampleBit(currentBit);
+            sampleBit(currentBit, timestamp);
         }
     }
     requestAnimationFrame(processVideoFrame);
 }
 
-function sampleBit(bit) {
+function sampleBit(bit, currentTimestamp) {
     signalState.innerText = bit === '1' ? 'HIGH (1)' : 'LOW (0)';
     
     // State 1: Capturing the 20-bit key after preamble sync
     if (isReadingPayload) {
         payloadBuffer += bit;
-        bufferVal.innerText = payloadBuffer;
-
-        if (payloadBuffer.length >= 20) {
-            const capturedToken = payloadBuffer.substring(0, 20);
+        
+        // Skip first 8 stabilization bits and extract 20 payload bits
+        if (payloadBuffer.length >= 30) {
+            const capturedToken = payloadBuffer.substring(9, 29);
             isReadingPayload = false;
             processPayload(capturedToken);
             bitBuffer = "";
             payloadBuffer = "";
+        } else if (payloadBuffer.length > 8) {
+            bufferVal.innerText = payloadBuffer.substring(8);
         }
         return;
     }
@@ -77,9 +90,21 @@ function sampleBit(bit) {
         isReadingPayload = true;
         payloadBuffer = "";
         bitBuffer = ""; 
+        
+        // Phase-Lock: Offset next sample point by 1.5x bit length to sample center of bit
+        lastSampleTime = currentTimestamp + (BIT_DURATION_MS / 2);
+
         lockStatus.className = "";
         lockStatus.innerText = "CAPTURING KEY... ⌛";
     }
+}
+
+function getHammingDistance(str1, str2) {
+    let distance = 0;
+    for (let i = 0; i < Math.min(str1.length, str2.length); i++) {
+        if (str1[i] !== str2[i]) distance++;
+    }
+    return distance + Math.abs(str1.length - str2.length);
 }
 
 function generateExpectedToken() {
@@ -97,7 +122,10 @@ function processPayload(capturedToken) {
     const expectedToken = generateExpectedToken();
     decodedKey.innerText = capturedToken;
 
-    if (capturedToken === expectedToken) {
+    // Allow 1-bit Hamming error window for camera frame rate dropouts
+    const bitErrors = getHammingDistance(capturedToken, expectedToken);
+
+    if (bitErrors <= 1) {
         lockStatus.className = "unlocked";
         lockStatus.innerText = `ACCESS GRANTED (${DEVICE_LOCK_ID}) 🔓`;
     } else {
