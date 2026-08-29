@@ -1,89 +1,113 @@
 const SHARED_SECRET = "MY_SECRET_KEY_123";
+const DEVICE_LOCK_ID = "LOCK_01"; // Set to "LOCK_01" or "LOCK_02"
+const BRIGHTNESS_THRESHOLD = 200; // Pixel brightness threshold (0-255)
+const BIT_SAMPLE_INTERVAL_MS = 100;
 
-// Direct inter-tab communication channel
-const channel = new BroadcastChannel('optical_key_channel');
-
+let isReading = false;
 let bitBuffer = "";
-const sensor = document.getElementById('sensor');
+let lastSampleTime = 0;
+
+const video = document.getElementById('webcam');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
 const signalState = document.getElementById('signal-state');
 const bufferVal = document.getElementById('buffer-val');
 const decodedKey = document.getElementById('decoded-key');
 const lockStatus = document.getElementById('lock-status');
 
-// Generates 20-bit expected hash token
+// Initialize WebCam stream
+navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } })
+    .then(stream => {
+        video.srcObject = stream;
+        video.play();
+        requestAnimationFrame(processVideoFrame);
+    })
+    .catch(err => console.error("Camera access denied:", err));
+
+function processVideoFrame(timestamp) {
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // Calculate average luminosity at center of webcam view
+        const frameData = ctx.getImageData(canvas.width / 4, canvas.height / 4, canvas.width / 2, canvas.height / 2).data;
+        let totalBrightness = 0;
+        for (let i = 0; i < frameData.length; i += 4) {
+            totalBrightness += (frameData[i] + frameData[i + 1] + frameData[i + 2]) / 3;
+        }
+        const avgBrightness = totalBrightness / (frameData.length / 4);
+
+        // Determine if light is High (1) or Low (0)
+        const currentBit = avgBrightness > BRIGHTNESS_THRESHOLD ? '1' : '0';
+
+        // Sample bit every 100ms
+        if (timestamp - lastSampleTime >= BIT_SAMPLE_INTERVAL_MS) {
+            lastSampleTime = timestamp;
+            sampleBit(currentBit);
+        }
+    }
+    requestAnimationFrame(processVideoFrame);
+}
+
+function sampleBit(bit) {
+    signalState.innerText = bit === '1' ? 'HIGH (1)' : 'LOW (0)';
+    bitBuffer += bit;
+
+    if (bitBuffer.length > 50) {
+        bitBuffer = bitBuffer.slice(-50); // Keep buffer light
+    }
+
+    // Dynamic Initialization: Look for Preamble "1100"
+    const preambleIdx = bitBuffer.indexOf("1100");
+    if (preambleIdx !== -1) {
+        if (!isReading) {
+            isReading = true;
+            lockStatus.className = "";
+            lockStatus.innerText = "READING 20 BITS... ⌛";
+        }
+
+        const capturedStream = bitBuffer.substring(preambleIdx + 4);
+        bufferVal.innerText = capturedStream;
+
+        // STOP CONDITION: Automatically stops after receiving exactly 20 payload bits
+        if (capturedStream.length >= 20) {
+            const capturedToken = capturedStream.substring(0, 20);
+            processPayload(capturedToken);
+            bitBuffer = ""; // Reset buffer
+            isReading = false;
+        }
+    }
+}
+
 function generateExpectedToken() {
     const timeBucket = Math.floor(Date.now() / 30000);
-    const rawString = SHARED_SECRET + timeBucket;
+    const rawString = SHARED_SECRET + DEVICE_LOCK_ID + timeBucket;
     let hash = 0;
     for (let i = 0; i < rawString.length; i++) {
         hash = ((hash << 5) - hash) + rawString.charCodeAt(i);
         hash |= 0;
     }
-    // 0xFFFFF bitmask extracts 20 bits
     return (Math.abs(hash) & 0xFFFFF).toString(2).padStart(20, '0');
 }
 
-// Listen for bit pulse events from transmitter
-channel.onmessage = (event) => {
-    const data = event.data;
+function processPayload(capturedToken) {
+    const expectedToken = generateExpectedToken();
+    decodedKey.innerText = capturedToken;
 
-    if (data.type === 'PULSE') {
-        const bit = data.bit;
-        const isOn = (bit === '1');
-
-        // Update sensor visual feedback
-        if (sensor) {
-            sensor.style.backgroundColor = isOn ? '#ffffff' : '#000000';
-            sensor.style.boxShadow = isOn ? '0 0 30px #ffbb00' : '0 0 10px rgba(0,0,0,0.5)';
-        }
-        if (signalState) signalState.innerText = isOn ? 'HIGH (1)' : 'LOW (0)';
-
-        // Append received bit to stream
-        bitBuffer += bit;
-        if (bufferVal) bufferVal.innerText = bitBuffer;
-    } 
-    else if (data.type === 'COMPLETE') {
-        if (signalState) signalState.innerText = 'OFF (0)';
-        if (sensor) {
-            sensor.style.backgroundColor = '#000000';
-            sensor.style.boxShadow = '0 0 10px rgba(0,0,0,0.5)';
-        }
-
-        // Look for Preamble (1100) + 20-bit Payload (requires 24 total bits)
-        const preambleIdx = bitBuffer.indexOf("1100");
-        if (preambleIdx !== -1 && (bitBuffer.length - preambleIdx) >= 24) {
-            const capturedToken = bitBuffer.substring(preambleIdx + 4, preambleIdx + 24);
-            const expectedToken = generateExpectedToken();
-
-            if (decodedKey) decodedKey.innerText = capturedToken;
-
-            if (capturedToken === expectedToken) {
-                if (lockStatus) {
-                    lockStatus.className = "unlocked";
-                    lockStatus.innerText = "ACCESS GRANTED! 🔓";
-                }
-            } else {
-                if (lockStatus) {
-                    lockStatus.className = "invalid";
-                    lockStatus.innerText = "INVALID KEY ❌";
-                }
-            }
-        } else {
-            if (lockStatus) {
-                lockStatus.className = "invalid";
-                lockStatus.innerText = "SIGNAL CORRUPTED ❌";
-            }
-        }
-
-        // Auto-reset receiver state after 3 seconds
-        setTimeout(() => {
-            bitBuffer = "";
-            if (bufferVal) bufferVal.innerText = "...";
-            if (decodedKey) decodedKey.innerText = "NONE";
-            if (lockStatus) {
-                lockStatus.className = "";
-                lockStatus.innerText = "LOCKED 🔒";
-            }
-        }, 3000);
+    if (capturedToken === expectedToken) {
+        lockStatus.className = "unlocked";
+        lockStatus.innerText = `ACCESS GRANTED (${DEVICE_LOCK_ID}) 🔓`;
+    } else {
+        lockStatus.className = "invalid";
+        lockStatus.innerText = `ACCESS DENIED ❌\nWrong Lock Key`;
     }
-};
+
+    setTimeout(() => {
+        decodedKey.innerText = "NONE";
+        bufferVal.innerText = "Waiting...";
+        lockStatus.className = "";
+        lockStatus.innerText = "LOCKED 🔒";
+    }, 4000);
+}
