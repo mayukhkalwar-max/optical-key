@@ -57,9 +57,9 @@ async function transmitTokenForLock(targetLockId) {
     if (btn2) btn2.disabled = true;
 
     const payload = generateToken(targetLockId);
-    const fullBitStream = "1100" + payload + "0"; // 4 Preamble + 20 Payload + 1 Stop Bit
+    // Changed Preamble to "111100" (4 High, 2 Low) to prevent payload collision
+    const fullBitStream = "111100" + payload + "00"; 
     
-    // Display the encrypted 20-bit binary token in the status text
     if (status) status.innerText = `Token: ${payload}`;
 
     let bitIndex = 0;
