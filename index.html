@@ -28,17 +28,19 @@
             align-items: center;
             justify-content: center;
             margin-bottom: 25px;
+            transition: background-color 0.05s ease;
         }
-        #flash-icon { font-size: 50px; color: #333; }
+        #flash-icon { font-size: 50px; color: #333; transition: transform 0.05s ease, color 0.05s ease; }
         .btn-group { display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 300px; }
         button {
             width: 100%; padding: 15px; font-size: 15px; font-weight: bold;
             border: none; border-radius: 10px; cursor: pointer;
+            transition: opacity 0.2s ease;
         }
         .btn-l1 { background-color: #ffc107; color: #000; }
         .btn-l2 { background-color: #00e5ff; color: #000; }
-        button:disabled { opacity: 0.5; }
-        #status { margin-top: 15px; font-size: 14px; color: #888; text-align: center; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        #status { margin-top: 15px; font-size: 14px; color: #888; text-align: center; font-family: monospace; }
         #mode-desc { margin-bottom: 15px; font-size: 13px; color: #666; }
     </style>
 </head>
