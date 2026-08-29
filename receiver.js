@@ -1,7 +1,7 @@
 const SHARED_SECRET = "MY_SECRET_KEY_123";
-const DEVICE_LOCK_ID = "LOCK_01"; // Change to "LOCK_02" for second lock target
-const BRIGHTNESS_THRESHOLD = 200; // Adjust (0-255) based on room lighting
-const BIT_SAMPLE_INTERVAL_MS = 100;
+const DEVICE_LOCK_ID = "LOCK_01"; // Set to "LOCK_01" or "LOCK_02"
+const BRIGHTNESS_THRESHOLD = 200; 
+const BIT_SAMPLE_INTERVAL_MS = 200; // Matches transmitter rate (200ms)
 
 let isReadingPayload = false;
 let bitBuffer = "";
@@ -17,7 +17,6 @@ const bufferVal = document.getElementById('buffer-val');
 const decodedKey = document.getElementById('decoded-key');
 const lockStatus = document.getElementById('lock-status');
 
-// Initialize Laptop Webcam Stream
 navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } })
     .then(stream => {
         video.srcObject = stream;
@@ -32,7 +31,6 @@ function processVideoFrame(timestamp) {
         canvas.height = video.videoHeight;
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        // Analyze center region luminosity
         const frameData = ctx.getImageData(canvas.width / 4, canvas.height / 4, canvas.width / 2, canvas.height / 2).data;
         let totalBrightness = 0;
         for (let i = 0; i < frameData.length; i += 4) {
@@ -40,10 +38,8 @@ function processVideoFrame(timestamp) {
         }
         const avgBrightness = totalBrightness / (frameData.length / 4);
 
-        // Convert brightness to bit state
         const currentBit = avgBrightness > BRIGHTNESS_THRESHOLD ? '1' : '0';
 
-        // Sample at fixed 100ms timing interval
         if (timestamp - lastSampleTime >= BIT_SAMPLE_INTERVAL_MS) {
             lastSampleTime = timestamp;
             sampleBit(currentBit);
@@ -53,12 +49,12 @@ function processVideoFrame(timestamp) {
 }
 
 function sampleBit(bit) {
-    if (signalState) signalState.innerText = bit === '1' ? 'HIGH (1)' : 'LOW (0)';
-
-    // Phase 2: Capturing the 20-bit key payload after preamble detection
+    signalState.innerText = bit === '1' ? 'HIGH (1)' : 'LOW (0)';
+    
+    // State 1: Capturing the 20-bit key after preamble sync
     if (isReadingPayload) {
         payloadBuffer += bit;
-        if (bufferVal) bufferVal.innerText = payloadBuffer;
+        bufferVal.innerText = payloadBuffer;
 
         if (payloadBuffer.length >= 20) {
             const capturedToken = payloadBuffer.substring(0, 20);
@@ -70,21 +66,19 @@ function sampleBit(bit) {
         return;
     }
 
-    // Phase 1: Scanning incoming bits for preamble sequence "111100"
+    // State 2: Searching for sync preamble sequence "111100"
     bitBuffer += bit;
-    if (bitBuffer.length > 20) {
-        bitBuffer = bitBuffer.slice(-20);
+    if (bitBuffer.length > 30) {
+        bitBuffer = bitBuffer.slice(-30);
     }
 
     const preambleIdx = bitBuffer.indexOf("111100");
     if (preambleIdx !== -1) {
         isReadingPayload = true;
         payloadBuffer = "";
-        bitBuffer = ""; // Flush preamble from buffer
-        if (lockStatus) {
-            lockStatus.className = "";
-            lockStatus.innerText = "CAPTURING KEY... ⌛";
-        }
+        bitBuffer = ""; 
+        lockStatus.className = "";
+        lockStatus.innerText = "CAPTURING KEY... ⌛";
     }
 }
 
@@ -101,27 +95,20 @@ function generateExpectedToken() {
 
 function processPayload(capturedToken) {
     const expectedToken = generateExpectedToken();
-    if (decodedKey) decodedKey.innerText = capturedToken;
+    decodedKey.innerText = capturedToken;
 
     if (capturedToken === expectedToken) {
-        if (lockStatus) {
-            lockStatus.className = "unlocked";
-            lockStatus.innerText = `ACCESS GRANTED (${DEVICE_LOCK_ID}) 🔓`;
-        }
+        lockStatus.className = "unlocked";
+        lockStatus.innerText = `ACCESS GRANTED (${DEVICE_LOCK_ID}) 🔓`;
     } else {
-        if (lockStatus) {
-            lockStatus.className = "invalid";
-            lockStatus.innerText = `ACCESS DENIED ❌\nToken Mismatch`;
-        }
+        lockStatus.className = "invalid";
+        lockStatus.innerText = `ACCESS DENIED ❌`;
     }
 
-    // Reset interface back to listening mode after 4 seconds
     setTimeout(() => {
-        if (decodedKey) decodedKey.innerText = "NONE";
-        if (bufferVal) bufferVal.innerText = "Waiting...";
-        if (lockStatus) {
-            lockStatus.className = "";
-            lockStatus.innerText = "LOCKED 🔒";
-        }
+        decodedKey.innerText = "NONE";
+        bufferVal.innerText = "Waiting...";
+        lockStatus.className = "";
+        lockStatus.innerText = "LOCKED 🔒";
     }, 4000);
 }
