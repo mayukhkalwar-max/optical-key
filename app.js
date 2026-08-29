@@ -1,96 +1,61 @@
-const SHARED_SECRET = "MY_SECRET_KEY_123";
-const BIT_DURATION_MS = 200; // 200ms per bit for camera sync margin
-
-let track = null;
-let useTorch = false;
-let isTransmitting = false;
-
-window.addEventListener('DOMContentLoaded', async () => {
-    const desc = document.getElementById('mode-desc');
-    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: 'environment' }
-            });
-            track = stream.getVideoTracks()[0];
-            const capabilities = track.getCapabilities();
-            if (capabilities.torch) {
-                useTorch = true;
-                if (desc) desc.innerText = "Hardware LED Torch Enabled";
-                return;
-            }
-        } catch (e) {}
-    }
-    if (desc) desc.innerText = "Screen Flash Mode Only";
-});
-
-async function setTorchState(state) {
-    if (useTorch && track) {
-        try {
-            await track.applyConstraints({ advanced: [{ torch: state }] });
-        } catch (e) {}
-    }
-}
-
-function generateToken(targetLockId) {
-    const timeBucket = Math.floor(Date.now() / 30000);
-    const rawString = SHARED_SECRET + targetLockId + timeBucket;
-    let hash = 0;
-    for (let i = 0; i < rawString.length; i++) {
-        hash = ((hash << 5) - hash) + rawString.charCodeAt(i);
-        hash |= 0;
-    }
-    return (Math.abs(hash) & 0xFFFFF).toString(2).padStart(20, '0');
-}
-
-async function transmitTokenForLock(targetLockId) {
-    if (isTransmitting) return;
-
-    const status = document.getElementById('status');
-    const btn1 = document.getElementById('tx-btn-1');
-    const btn2 = document.getElementById('tx-btn-2');
-    const flashBox = document.getElementById('flash-box');
-    const flashIcon = document.getElementById('flash-icon');
-
-    isTransmitting = true;
-    if (btn1) btn1.disabled = true;
-    if (btn2) btn2.disabled = true;
-
-    const payload = generateToken(targetLockId);
-    
-    // Header Structure:
-    // 11110000 (Camera/Hardware Warmup) + 111100 (Sync Preamble) + PAYLOAD (20 Bits) + 00 (Trailing Stop)
-    const fullBitStream = "11110000111100" + payload + "00"; 
-    
-    if (status) status.innerText = `Token: ${payload}`;
-
-    let bitIndex = 0;
-
-    const timer = setInterval(async () => {
-        if (bitIndex < fullBitStream.length) {
-            const currentBit = fullBitStream[bitIndex];
-            const isOn = (currentBit === '1');
-
-            if (useTorch) await setTorchState(isOn);
-
-            if (flashBox) flashBox.style.backgroundColor = isOn ? "#FFFFFF" : "#000000";
-            if (flashIcon) {
-                flashIcon.style.color = isOn ? "#ffbb00" : "#222222";
-                flashIcon.style.transform = isOn ? "scale(1.2)" : "scale(1)";
-            }
-
-            bitIndex++;
-        } else {
-            clearInterval(timer);
-            if (useTorch) await setTorchState(false);
-            if (flashBox) flashBox.style.backgroundColor = "#111111";
-            if (flashIcon) flashIcon.style.color = "#333333";
-            
-            if (status) status.innerText = `Sent: ${payload}`;
-            
-            if (btn1) btn1.disabled = false;
-            if (btn2) btn2.disabled = false;
-            isTransmitting = false;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Optical Key Transmitter</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background-color: #000;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
         }
-    }, BIT_DURATION_MS);
-}
+        #flash-box {
+            width: 220px;
+            height: 220px;
+            border-radius: 20px;
+            background-color: #111;
+            border: 2px solid #222;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 25px;
+            transition: background-color 0.05s ease;
+        }
+        #flash-icon { font-size: 50px; color: #333; transition: transform 0.05s ease, color 0.05s ease; }
+        .btn-group { display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 300px; }
+        button {
+            width: 100%; padding: 15px; font-size: 15px; font-weight: bold;
+            border: none; border-radius: 10px; cursor: pointer;
+            transition: opacity 0.2s ease;
+        }
+        .btn-l1 { background-color: #ffc107; color: #000; }
+        .btn-l2 { background-color: #00e5ff; color: #000; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        #status { margin-top: 15px; font-size: 14px; color: #888; text-align: center; font-family: monospace; }
+        #mode-desc { margin-bottom: 15px; font-size: 13px; color: #666; }
+    </style>
+</head>
+<body>
+
+    <div id="mode-desc">Detecting Flashlight hardware...</div>
+    <div id="flash-box"><div id="flash-icon">⚡</div></div>
+
+    <div class="btn-group">
+        <button id="tx-btn-1" class="btn-l1" onclick="transmitTokenForLock('LOCK_01')">Transmit Key for Lock 1</button>
+        <button id="tx-btn-2" class="btn-l2" onclick="transmitTokenForLock('LOCK_02')">Transmit Key for Lock 2</button>
+    </div>
+
+    <div id="status">Ready</div>
+
+    <script src="app.js"></script>
+</body>
+</html>
