@@ -1,10 +1,11 @@
 const SHARED_SECRET = "MY_SECRET_KEY_123";
-const DEVICE_LOCK_ID = "LOCK_01"; // Set to "LOCK_01" or "LOCK_02"
-const BRIGHTNESS_THRESHOLD = 200; // Pixel brightness threshold (0-255)
+const DEVICE_LOCK_ID = "LOCK_01"; // Change to "LOCK_02" for second lock target
+const BRIGHTNESS_THRESHOLD = 200; // Adjust (0-255) based on room lighting
 const BIT_SAMPLE_INTERVAL_MS = 100;
 
-let isReading = false;
+let isReadingPayload = false;
 let bitBuffer = "";
+let payloadBuffer = "";
 let lastSampleTime = 0;
 
 const video = document.getElementById('webcam');
@@ -16,7 +17,7 @@ const bufferVal = document.getElementById('buffer-val');
 const decodedKey = document.getElementById('decoded-key');
 const lockStatus = document.getElementById('lock-status');
 
-// Initialize WebCam stream
+// Initialize Laptop Webcam Stream
 navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } })
     .then(stream => {
         video.srcObject = stream;
@@ -31,7 +32,7 @@ function processVideoFrame(timestamp) {
         canvas.height = video.videoHeight;
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        // Calculate average luminosity at center of webcam view
+        // Analyze center region luminosity
         const frameData = ctx.getImageData(canvas.width / 4, canvas.height / 4, canvas.width / 2, canvas.height / 2).data;
         let totalBrightness = 0;
         for (let i = 0; i < frameData.length; i += 4) {
@@ -39,10 +40,10 @@ function processVideoFrame(timestamp) {
         }
         const avgBrightness = totalBrightness / (frameData.length / 4);
 
-        // Determine if light is High (1) or Low (0)
+        // Convert brightness to bit state
         const currentBit = avgBrightness > BRIGHTNESS_THRESHOLD ? '1' : '0';
 
-        // Sample bit every 100ms
+        // Sample at fixed 100ms timing interval
         if (timestamp - lastSampleTime >= BIT_SAMPLE_INTERVAL_MS) {
             lastSampleTime = timestamp;
             sampleBit(currentBit);
@@ -52,31 +53,37 @@ function processVideoFrame(timestamp) {
 }
 
 function sampleBit(bit) {
-    signalState.innerText = bit === '1' ? 'HIGH (1)' : 'LOW (0)';
-    bitBuffer += bit;
+    if (signalState) signalState.innerText = bit === '1' ? 'HIGH (1)' : 'LOW (0)';
 
-    if (bitBuffer.length > 50) {
-        bitBuffer = bitBuffer.slice(-50); // Keep buffer light
+    // Phase 2: Capturing the 20-bit key payload after preamble detection
+    if (isReadingPayload) {
+        payloadBuffer += bit;
+        if (bufferVal) bufferVal.innerText = payloadBuffer;
+
+        if (payloadBuffer.length >= 20) {
+            const capturedToken = payloadBuffer.substring(0, 20);
+            isReadingPayload = false;
+            processPayload(capturedToken);
+            bitBuffer = "";
+            payloadBuffer = "";
+        }
+        return;
     }
 
-    // Dynamic Initialization: Look for Preamble "1100"
-    const preambleIdx = bitBuffer.indexOf("1100");
+    // Phase 1: Scanning incoming bits for preamble sequence "111100"
+    bitBuffer += bit;
+    if (bitBuffer.length > 20) {
+        bitBuffer = bitBuffer.slice(-20);
+    }
+
+    const preambleIdx = bitBuffer.indexOf("111100");
     if (preambleIdx !== -1) {
-        if (!isReading) {
-            isReading = true;
+        isReadingPayload = true;
+        payloadBuffer = "";
+        bitBuffer = ""; // Flush preamble from buffer
+        if (lockStatus) {
             lockStatus.className = "";
-            lockStatus.innerText = "READING 20 BITS... ⌛";
-        }
-
-        const capturedStream = bitBuffer.substring(preambleIdx + 4);
-        bufferVal.innerText = capturedStream;
-
-        // STOP CONDITION: Automatically stops after receiving exactly 20 payload bits
-        if (capturedStream.length >= 20) {
-            const capturedToken = capturedStream.substring(0, 20);
-            processPayload(capturedToken);
-            bitBuffer = ""; // Reset buffer
-            isReading = false;
+            lockStatus.innerText = "CAPTURING KEY... ⌛";
         }
     }
 }
@@ -94,20 +101,27 @@ function generateExpectedToken() {
 
 function processPayload(capturedToken) {
     const expectedToken = generateExpectedToken();
-    decodedKey.innerText = capturedToken;
+    if (decodedKey) decodedKey.innerText = capturedToken;
 
     if (capturedToken === expectedToken) {
-        lockStatus.className = "unlocked";
-        lockStatus.innerText = `ACCESS GRANTED (${DEVICE_LOCK_ID}) 🔓`;
+        if (lockStatus) {
+            lockStatus.className = "unlocked";
+            lockStatus.innerText = `ACCESS GRANTED (${DEVICE_LOCK_ID}) 🔓`;
+        }
     } else {
-        lockStatus.className = "invalid";
-        lockStatus.innerText = `ACCESS DENIED ❌\nWrong Lock Key`;
+        if (lockStatus) {
+            lockStatus.className = "invalid";
+            lockStatus.innerText = `ACCESS DENIED ❌\nToken Mismatch`;
+        }
     }
 
+    // Reset interface back to listening mode after 4 seconds
     setTimeout(() => {
-        decodedKey.innerText = "NONE";
-        bufferVal.innerText = "Waiting...";
-        lockStatus.className = "";
-        lockStatus.innerText = "LOCKED 🔒";
+        if (decodedKey) decodedKey.innerText = "NONE";
+        if (bufferVal) bufferVal.innerText = "Waiting...";
+        if (lockStatus) {
+            lockStatus.className = "";
+            lockStatus.innerText = "LOCKED 🔒";
+        }
     }, 4000);
 }
