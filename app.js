@@ -1,5 +1,5 @@
 const SHARED_SECRET = "MY_SECRET_KEY_123";
-const BIT_DURATION_MS = 100;
+const BIT_DURATION_MS = 200; // 200ms per bit for camera sync margin
 
 let track = null;
 let useTorch = false;
@@ -57,8 +57,10 @@ async function transmitTokenForLock(targetLockId) {
     if (btn2) btn2.disabled = true;
 
     const payload = generateToken(targetLockId);
-    // Changed Preamble to "111100" (4 High, 2 Low) to prevent payload collision
-    const fullBitStream = "111100" + payload + "00"; 
+    
+    // Header Structure:
+    // 11110000 (Camera/Hardware Warmup) + 111100 (Sync Preamble) + PAYLOAD (20 Bits) + 00 (Trailing Stop)
+    const fullBitStream = "11110000111100" + payload + "00"; 
     
     if (status) status.innerText = `Token: ${payload}`;
 
