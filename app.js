@@ -59,7 +59,8 @@ async function transmitTokenForLock(targetLockId) {
     const payload = generateToken(targetLockId);
     const fullBitStream = "1100" + payload + "0"; // 4 Preamble + 20 Payload + 1 Stop Bit
     
-    if (status) status.innerText = `Transmitting for ${targetLockId}...`;
+    // Display the encrypted 20-bit binary token in the status text
+    if (status) status.innerText = `Token: ${payload}`;
 
     let bitIndex = 0;
 
@@ -82,7 +83,9 @@ async function transmitTokenForLock(targetLockId) {
             if (useTorch) await setTorchState(false);
             if (flashBox) flashBox.style.backgroundColor = "#111111";
             if (flashIcon) flashIcon.style.color = "#333333";
-            if (status) status.innerText = "Transmission Complete!";
+            
+            if (status) status.innerText = `Sent: ${payload}`;
+            
             if (btn1) btn1.disabled = false;
             if (btn2) btn2.disabled = false;
             isTransmitting = false;
