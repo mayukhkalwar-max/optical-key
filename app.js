@@ -48,13 +48,11 @@ async function transmitTokenForLock(targetLockId) {
 
     const status = document.getElementById('status');
     const btn1 = document.getElementById('tx-btn-1');
-    const btn2 = document.getElementById('tx-btn-2');
     const flashBox = document.getElementById('flash-box');
     const flashIcon = document.getElementById('flash-icon');
 
     isTransmitting = true;
     if (btn1) btn1.disabled = true;
-    if (btn2) btn2.disabled = true;
 
     const payload = generateToken(targetLockId);
     
@@ -89,7 +87,6 @@ async function transmitTokenForLock(targetLockId) {
             if (status) status.innerText = `Sent: ${payload}`;
             
             if (btn1) btn1.disabled = false;
-            if (btn2) btn2.disabled = false;
             isTransmitting = false;
         }
     }, BIT_DURATION_MS);
