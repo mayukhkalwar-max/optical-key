@@ -19,6 +19,7 @@ const ctx = canvas.getContext('2d');
 const signalState = document.getElementById('signal-state');
 const bufferVal = document.getElementById('buffer-val');
 const decodedKey = document.getElementById('decoded-key');
+const decodedKey2 = document.getElementById('decoded-key-2');
 const lockStatus = document.getElementById('lock-status');
 
 navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } })
@@ -65,15 +66,16 @@ function sampleBit(bit, currentTimestamp) {
     // State 1: Capturing the 20-bit key after preamble sync
     if (isReadingPayload) {
         payloadBuffer += bit;
-        
+        bufferVal.innerText = payloadBuffer;
         // Skip first 8 stabilization bits and extract 20 payload bits
         if (payloadBuffer.length >= 30) {
-            const capturedToken = payloadBuffer.substring(9, 29);
+            const token1 = payloadBuffer.substring(10, 30);
+            const token2 = payloadBuffer.substring(9, 29);
             isReadingPayload = false;
-            processPayload(capturedToken);
+            processPayload(token1, token2);
             bitBuffer = "";
             payloadBuffer = "";
-        } else if (payloadBuffer.length > 8) {
+        } else if (payloadBuffer.length > 7) {
             bufferVal.innerText = payloadBuffer.substring(8);
         }
         return;
@@ -118,14 +120,15 @@ function generateExpectedToken() {
     return (Math.abs(hash) & 0xFFFFF).toString(2).padStart(20, '0');
 }
 
-function processPayload(capturedToken) {
+function processPayload(token1, token2) {
     const expectedToken = generateExpectedToken();
-    decodedKey.innerText = capturedToken;
+    decodedKey.innerText = token1;
+    decodedKey2.innerText = token2;
 
     // Allow 1-bit Hamming error window for camera frame rate dropouts
-    const bitErrors = getHammingDistance(capturedToken, expectedToken);
-
-    if (bitErrors <= 1) {
+    const bitErrors1 = getHammingDistance(token1, expectedToken);
+    const bitErrors2 = getHammingDistance(token2, expectedToken);
+    if (bitErrors1 <= 1 || bitErrors2 <= 1) {
         lockStatus.className = "unlocked";
         lockStatus.innerText = `ACCESS GRANTED (${DEVICE_LOCK_ID}) 🔓`;
     } else {
@@ -135,6 +138,7 @@ function processPayload(capturedToken) {
 
     setTimeout(() => {
         decodedKey.innerText = "NONE";
+        decodedKey2.innerText = "NONE";
         bufferVal.innerText = "Waiting...";
         lockStatus.className = "";
         lockStatus.innerText = "LOCKED 🔒";
