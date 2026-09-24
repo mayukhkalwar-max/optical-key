@@ -110,13 +110,18 @@ function getHammingDistance(str1, str2) {
 }
 
 function generateExpectedToken() {
-    const timeBucket = Math.floor(Date.now() / 30000);
+   const timeBucket = Math.floor(Date.now() / 30000);
     const rawString = SHARED_SECRET + DEVICE_LOCK_ID + timeBucket;
     let hash = 0;
     for (let i = 0; i < rawString.length; i++) {
         hash = ((hash << 5) - hash) + rawString.charCodeAt(i);
         hash |= 0;
     }
+    hash ^= hash >>> 16;
+    hash = Math.imul(hash, 0x21f0aaad);
+    hash ^= hash >>> 15;
+    hash = Math.imul(hash, 0x735a2d97);
+    hash ^= hash >>> 15;
     return (Math.abs(hash) & 0xFFFFF).toString(2).padStart(20, '0');
 }
 
