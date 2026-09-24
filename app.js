@@ -40,6 +40,11 @@ function generateToken(targetLockId) {
         hash = ((hash << 5) - hash) + rawString.charCodeAt(i);
         hash |= 0;
     }
+    hash ^= hash >>> 16;
+    hash = Math.imul(hash, 0x21f0aaad);
+    hash ^= hash >>> 15;
+    hash = Math.imul(hash, 0x735a2d97);
+    hash ^= hash >>> 15;
     return (Math.abs(hash) & 0xFFFFF).toString(2).padStart(20, '0');
 }
 
